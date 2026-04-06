@@ -1,0 +1,41 @@
+# Copy this file to settings.yaml and fill in your values.
+
+scrapling:
+  headless: true                # false = show browser window
+  max_sessions: 3               # concurrent browser sessions (~400-500MB RAM each)
+  timeout: 60000                # max wait per page (ms)
+  solve_cloudflare: true        # Cloudflare bypass
+  block_webrtc: true            # WebRTC leak prevention
+  hide_canvas: true             # Canvas fingerprint hiding
+
+proxies:
+  rotation_strategy: "round_robin"  # round_robin | random | least_used
+  pool:
+    - server: "http://proxy1.example.com:8080"
+      username: "user1"
+      password: "pass1"
+    - server: "http://proxy2.example.com:8080"
+      username: "user2"
+      password: "pass2"
+
+rate_limiting:
+  default_delay: 2.0            # seconds between requests to same domain
+  per_domain:
+    x.com: 3.0
+    instagram.com: 4.0
+    youtube.com: 2.0
+    facebook.com: 3.0
+    sikayetvar.com: 1.5
+
+scraper:
+  concurrency: 10
+  max_retries: 3
+  retry_delay: 5.0
+
+server:
+  host: "0.0.0.0"
+  port: 8000
+
+logging:
+  level: "INFO"
+  json_output: true

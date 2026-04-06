@@ -1,0 +1,38 @@
+proxies:
+  rotation_strategy: "round_robin"
+  pool: []
+  # Example:
+  # pool:
+  #   - server: "http://proxy1.example.com:8080"
+  #     username: "user"
+  #     password: "pass"
+
+rate_limiting:
+  default_delay: 2.0
+  per_domain:
+    x.com: 3.0
+    instagram.com: 4.0
+    youtube.com: 2.0
+    facebook.com: 3.0
+    sikayetvar.com: 1.5
+
+scrapling:
+  headless: true
+  max_sessions: 3
+  timeout: 60000
+  solve_cloudflare: true
+  block_webrtc: true
+  hide_canvas: true
+
+scraper:
+  concurrency: 10
+  max_retries: 3
+  retry_delay: 5.0
+
+server:
+  host: "0.0.0.0"
+  port: 8000
+
+logging:
+  level: "INFO"
+  json_output: true

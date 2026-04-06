@@ -1,0 +1,16 @@
+services:
+  scraper:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./config:/app/config:ro
+    restart: unless-stopped
+    mem_limit: 2g
+    shm_size: "1gb"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
