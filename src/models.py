@@ -56,18 +56,30 @@ class ScrapeResult(BaseModel):
 
 
 # --- Unified HTTP response models ---
+#
+# Cross-platform normalization rules:
+#   likes    ← likes, reactions
+#   comments ← comments, replies
+#   shares   ← shares, reposts
+#   views    ← views, view_count
+#   author   ← username, channel, page name, complaint creator
+#
+# Any platform-specific concept that doesn't fit these buckets is dropped.
 
 
-class UnifiedMetrics(BaseModel):
-    """Unified metric fields across all platforms. Missing metrics are null."""
+class Metrics(BaseModel):
+    """Unified engagement metrics across all platforms. Missing metrics are null."""
 
     likes: int | None = None
     comments: int | None = None
-    views: int | None = None
     shares: int | None = None
-    reposts: int | None = None
-    replies: int | None = None
-    reactions: int | None = None
+    views: int | None = None
+
+
+class Media(BaseModel):
+    """Media artefacts attached to the post (post image, video thumbnail, etc.)."""
+
+    image_url: str | None = None
 
 
 class FetchResponse(BaseModel):
@@ -77,6 +89,7 @@ class FetchResponse(BaseModel):
     platform: str | None = None
     url: str
     scraped_at: datetime | None = None
-    metrics: UnifiedMetrics = UnifiedMetrics()
-    meta: dict[str, str | int | None] = {}
+    author: str | None = None
+    metrics: Metrics = Metrics()
+    media: Media = Media()
     error: str | None = None

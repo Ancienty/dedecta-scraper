@@ -8,15 +8,26 @@ Sosyal medya metriklerini kazıyan HTTP mikro servisi. URL gonder, JSON al.
 
 ## Desteklenen Platformlar
 
-Canli testlerden alinan degerler (2026-04-03):
+Tum platformlar **birlestirilmis (unified)** metrik isimleri kullanir:
 
-| Platform | Metrikler | Yontem | Ornek |
-|---|---|---|---|
-| `instagram.com` | likes, comments, username | Embedded Relay JSON regex | likes=529, comments=58 |
-| `youtube.com` | views, likes | ytInitialData JSON regex | views=16.807.599.978, likes=46.457.670 |
-| `x.com` | likes, reposts, replies, views | Aria-label regex (oturum gerektirmez) | views=696, replies=1 |
-| `facebook.com` | reactions, comments, shares | Embedded JSON payload regex | reactions=1.043, comments=172, shares=3.662 |
-| `sikayetvar.com` | view_count, comment_count | CSS secici | view_count=820, comment_count=1 |
+```
+likes      ← likes / reactions
+comments   ← comments / replies
+shares     ← shares / reposts
+views      ← views / view_count
+author     ← username / channel / page name / complaint creator
+image_url  ← post image / video thumbnail / cover image
+```
+
+Canli testlerden alinan degerler:
+
+| Platform | Cikarilan alanlar | Yontem |
+|---|---|---|
+| `instagram.com` | likes, comments, author, image_url | Embedded Relay JSON regex + og meta |
+| `youtube.com` | views, likes, comments, author, image_url | ytInitialData JSON regex + thumbnail derivation |
+| `x.com` / `twitter.com` | likes, comments, shares, views, author, image_url | Aria-label regex + og meta |
+| `facebook.com` | likes, comments, shares, author, image_url | Embedded JSON payload regex + og meta |
+| `sikayetvar.com` | views, comments, author, image_url | CSS secici + og meta |
 
 ---
 
@@ -58,17 +69,17 @@ Yanit:
   "success": true,
   "platform": "youtube",
   "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-  "scraped_at": "2026-04-06T12:00:00Z",
+  "scraped_at": "2026-04-27T12:00:00Z",
+  "author": "Rick Astley",
   "metrics": {
     "likes": 46457670,
-    "comments": null,
-    "views": 16807599978,
+    "comments": 2563174,
     "shares": null,
-    "reposts": null,
-    "replies": null,
-    "reactions": null
+    "views": 16807599978
   },
-  "meta": {},
+  "media": {
+    "image_url": "https://i.ytimg.com/vi/dQw4w9WgXcQ/maxresdefault.jpg"
+  },
   "error": null
 }
 ```
@@ -155,7 +166,20 @@ proxies:
 
 ## Yeni Platform Ekleme
 
-`src/platform_selectors.py` icindeki `PLATFORM_DEFS` sozlugune ekleyin:
+`src/platform_selectors.py` icindeki `PLATFORM_DEFS` sozlugune ekleyin.
+
+**Onemli:** Yeni platformlar **birlestirilmis vokabuleri** kullanmak zorundadir. Platforma ozgu isimler degil (ornegin `reactions`, `replies`, `view_count`), su sabit anahtarlar:
+
+| Anahtar | Hedef | Tip |
+|---|---|---|
+| `likes` | `metrics.likes` | int |
+| `comments` | `metrics.comments` | int |
+| `shares` | `metrics.shares` | int |
+| `views` | `metrics.views` | int |
+| `author` | response top-level `author` | string |
+| `image_url` | `media.image_url` | string |
+
+Platforma ozgu kavramlari bu kovalara map edin (FB `reaction_count` → `likes`, X `replies` → `comments`, X `reposts` → `shares`).
 
 ```python
 "ornek.com": PlatformDef(
@@ -168,6 +192,14 @@ proxies:
                 selector=r'"likeCount"\s*:\s*(\d+)',
                 method="regex",
                 transform="parse_number",
+            ),
+        ],
+        "image_url": [
+            SelectorDef(
+                selector='meta[property="og:image"]',
+                method="css",
+                attribute="content",
+                transform="identity",
             ),
         ],
     },
@@ -194,8 +226,15 @@ python scripts/test_mapping.py https://ornek.com/bir-gonderi
 
 | Transform | Aciklama |
 |---|---|
-| `parse_number` | `"1,234"` -> `1234` / `"16,807,599,978"` -> `16807599978` |
-| `identity` | Ham string olarak dondurur (kullanici adi gibi metin metrikler icin) |
+| `parse_number` | `"1,234"` -> `1234` / `"16,807,599,978"` -> `16807599978` / `"1.2M"` -> `1200000` |
+| `identity` | Ham string olarak dondurur (bos string ve sadece-bosluk None olur) |
+| `instagram_likes` | Instagram og:description'dan beğeni sayisini cikarir |
+| `instagram_comments` | Instagram og:description'dan yorum sayisini cikarir |
+| `instagram_username` | Instagram og:description'dan kullanici adini cikarir |
+| `x_handle_from_url` | `x.com/<handle>/status/...` URL'sinden @handle cikarir |
+| `x_handle_from_title` | X.com og:title'dan handle/display name cikarir |
+| `facebook_author_from_title` | Facebook og:title'dan ` \| Facebook` ekini temizler |
+| `youtube_thumbnail_from_id` | 11 karakterli videoId'yi `i.ytimg.com/.../maxresdefault.jpg` URL'sine donusturur |
 
 ---
 
@@ -216,7 +255,7 @@ src/
   logging_config.py     structlog kurulumu
 scripts/
   test_mapping.py       Tek URL test araci
-tests/                  56 birim testi
+tests/                  78 birim testi
 config/
   settings.yaml         Yapilandirma dosyasi
 Dockerfile

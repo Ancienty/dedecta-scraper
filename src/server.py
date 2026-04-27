@@ -17,7 +17,7 @@ from pydantic import HttpUrl
 
 from src.config import load_settings
 from src.logging_config import get_logger, setup_logging
-from src.models import FetchResponse, ScrapeResult, UnifiedMetrics
+from src.models import FetchResponse, Media, Metrics, ScrapeResult
 from src.proxy_pool import ProxyPool
 from src.rate_limiter import DomainRateLimiter
 from src.scraper import Scraper
@@ -35,20 +35,8 @@ DOMAIN_TO_PLATFORM: dict[str, str] = {
     "sikayetvar.com": "sikayetvar",
 }
 
-# Per-platform mapping from raw metric names to unified field names
-METRIC_NAME_MAP: dict[str, dict[str, str]] = {
-    "instagram": {},  # likes/comments already match
-    "youtube": {},    # likes/comments/views already match
-    "x": {},          # likes/reposts/replies/views already match
-    "facebook": {},   # reactions/comments/shares already match
-    "sikayetvar": {
-        "view_count": "views",
-        "comment_count": "comments",
-    },
-}
-
-# Metrics that belong in meta, not in UnifiedMetrics
-META_FIELDS = {"username"}
+# Selectors emit unified names — these are the destination buckets.
+NUMERIC_METRIC_NAMES = {"likes", "comments", "shares", "views"}
 
 
 def _resolve_platform(url: str) -> str | None:
@@ -60,30 +48,54 @@ def _resolve_platform(url: str) -> str | None:
     return DOMAIN_TO_PLATFORM.get(domain)
 
 
-def _build_response(url: str, platform: str | None, result: ScrapeResult) -> FetchResponse:
-    """Map a ScrapeResult to the unified FetchResponse schema."""
-    metrics = UnifiedMetrics()
-    meta: dict[str, str | int | None] = {}
+def _coerce_int(value: object) -> int | None:
+    """Best-effort int coercion for metric values that came from regex/text."""
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
-    name_map = METRIC_NAME_MAP.get(platform or "", {})
+
+def _build_response(url: str, platform: str | None, result: ScrapeResult) -> FetchResponse:
+    """Map a ScrapeResult to the unified FetchResponse schema.
+
+    Selectors produce metric values keyed by their unified name
+    (likes/comments/shares/views/author/image_url). This routes each value
+    to its destination on the response model.
+    """
+    metrics = Metrics()
+    media = Media()
+    author: str | None = None
 
     for mv in result.metrics:
-        if mv.name in META_FIELDS:
-            meta[mv.name] = mv.value
+        if mv.value is None:
             continue
 
-        unified_name = name_map.get(mv.name, mv.name)
-
-        if hasattr(metrics, unified_name) and mv.value is not None:
-            setattr(metrics, unified_name, int(mv.value) if not isinstance(mv.value, int) else mv.value)
+        if mv.name in NUMERIC_METRIC_NAMES:
+            coerced = _coerce_int(mv.value)
+            if coerced is not None:
+                setattr(metrics, mv.name, coerced)
+        elif mv.name == "author":
+            author = str(mv.value).strip() or None
+        elif mv.name == "image_url":
+            media.image_url = str(mv.value).strip() or None
+        else:
+            log.debug("unmapped_metric", name=mv.name, value=mv.value)
 
     return FetchResponse(
         success=result.success,
         platform=platform,
         url=str(result.url),
         scraped_at=result.scraped_at,
+        author=author,
         metrics=metrics,
-        meta=meta,
+        media=media,
         error=result.error,
     )
 

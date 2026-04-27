@@ -1,11 +1,16 @@
 """Per-platform hardcoded selector definitions and page_action functions.
 
-Each PlatformDef contains:
-  - metrics: ordered fallback lists of SelectorDef per metric name
-  - page_action: Playwright coroutine for modal dismissal / JS waiting
-  - wait_selector: Scrapling waits for this CSS selector before returning
-  - use_stealthy: True = StealthyFetcher (Camoufox/Cloudflare bypass),
-                  False = DynamicFetcher (lighter, faster)
+Every platform emits the same set of unified metric names:
+
+    likes      ← likes / reactions
+    comments   ← comments / replies
+    shares     ← shares / reposts
+    views      ← views / view_count
+    author     ← username / channel name / page name / complaint creator
+    image_url  ← post image / video thumbnail / cover image
+
+Selectors that don't apply to a platform are simply omitted; the unified
+response model leaves them null.
 """
 
 from __future__ import annotations
@@ -78,6 +83,18 @@ async def _x_action(page: Page) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Reusable selectors
+# ---------------------------------------------------------------------------
+
+_OG_IMAGE = SelectorDef(
+    selector='meta[property="og:image"]',
+    method="css",
+    attribute="content",
+    transform="identity",
+)
+
+
+# ---------------------------------------------------------------------------
 # Platform definitions
 # ---------------------------------------------------------------------------
 
@@ -108,7 +125,7 @@ PLATFORM_DEFS: dict[str, PlatformDef] = {
             "likes": [
                 SelectorDef(
                     # Matches: "like_count": 794, "logging_info_token": ...
-                    # The logging_info_token field immediately follows the authoritative like_count
+                    # logging_info_token immediately follows the authoritative like_count
                     selector=r'"like_count"\s*:\s*(\d+)\s*,\s*"logging_info_token"',
                     method="regex",
                     transform="parse_number",
@@ -136,7 +153,7 @@ PLATFORM_DEFS: dict[str, PlatformDef] = {
                     transform="instagram_comments",
                 ),
             ],
-            "username": [
+            "author": [
                 SelectorDef(
                     selector='meta[name="instapp:owner_user_name"]',
                     method="css",
@@ -157,6 +174,7 @@ PLATFORM_DEFS: dict[str, PlatformDef] = {
                     transform="instagram_username",
                 ),
             ],
+            "image_url": [_OG_IMAGE],
         },
     ),
     # ------------------------------------------------------------------
@@ -168,7 +186,6 @@ PLATFORM_DEFS: dict[str, PlatformDef] = {
     # by name because YouTube periodically changes its custom element names.
     #
     # Regex on the embedded JSON is the most stable approach.
-    # Comment count is not exposed in the public page HTML.
     # ------------------------------------------------------------------
     "youtube.com": PlatformDef(
         domain="youtube.com",
@@ -195,6 +212,37 @@ PLATFORM_DEFS: dict[str, PlatformDef] = {
                     method="regex",
                     transform="parse_number",
                 ),
+            ],
+            "author": [
+                # Channel name appears repeatedly; the first match in
+                # videoDetails / videoOwnerRenderer is the upload author.
+                SelectorDef(
+                    selector=r'"author"\s*:\s*"([^"]+)"',
+                    method="regex",
+                    transform="identity",
+                ),
+                SelectorDef(
+                    selector='link[itemprop="name"]',
+                    method="css",
+                    attribute="content",
+                    transform="identity",
+                ),
+                SelectorDef(
+                    selector='meta[itemprop="author"] link[itemprop="name"]',
+                    method="css",
+                    attribute="content",
+                    transform="identity",
+                ),
+            ],
+            "image_url": [
+                # Most reliable: derive from videoId. maxresdefault is always
+                # served by ytimg even when og:image points at a smaller crop.
+                SelectorDef(
+                    selector=r'"videoId"\s*:\s*"([A-Za-z0-9_-]{11})"',
+                    method="regex",
+                    transform="youtube_thumbnail_from_id",
+                ),
+                _OG_IMAGE,
             ],
         },
     ),
@@ -224,14 +272,14 @@ PLATFORM_DEFS: dict[str, PlatformDef] = {
                     transform="parse_number",
                 ),
             ],
-            "reposts": [
+            "shares": [  # Twitter "Repost" maps to the unified "shares" bucket
                 SelectorDef(
                     selector=r'"(\d+)\s+reposts?\.\s+Repost"',
                     method="regex",
                     transform="parse_number",
                 ),
             ],
-            "replies": [
+            "comments": [  # Twitter "Reply" maps to the unified "comments" bucket
                 SelectorDef(
                     selector=r'"(\d+)\s+Repl(?:y|ies)\.\s+Reply"',
                     method="regex",
@@ -246,6 +294,26 @@ PLATFORM_DEFS: dict[str, PlatformDef] = {
                     transform="parse_number",
                 ),
             ],
+            "author": [
+                # Most reliable: handle baked into og:url
+                SelectorDef(
+                    selector='meta[property="og:url"]',
+                    method="css",
+                    attribute="content",
+                    transform="x_handle_from_url",
+                ),
+                # Fallback: og:title — "Display Name (@handle) on X"
+                SelectorDef(
+                    selector='meta[property="og:title"]',
+                    method="css",
+                    attribute="content",
+                    transform="x_handle_from_title",
+                ),
+            ],
+            # og:image on X.com is the first attached photo for media tweets
+            # and falls back to the author's profile picture for text tweets.
+            # We surface it either way — callers can disambiguate by URL host.
+            "image_url": [_OG_IMAGE],
         },
     ),
     # ------------------------------------------------------------------
@@ -267,7 +335,7 @@ PLATFORM_DEFS: dict[str, PlatformDef] = {
         wait_selector=None,
         network_idle=False,
         metrics={
-            "reactions": [
+            "likes": [  # Facebook "reactions" maps to unified "likes" bucket
                 SelectorDef(
                     selector=r'"reaction_count"\s*:\s*\{"count"\s*:\s*(\d+)',
                     method="regex",
@@ -288,6 +356,15 @@ PLATFORM_DEFS: dict[str, PlatformDef] = {
                     transform="parse_number",
                 ),
             ],
+            "author": [
+                SelectorDef(
+                    selector='meta[property="og:title"]',
+                    method="css",
+                    attribute="content",
+                    transform="facebook_author_from_title",
+                ),
+            ],
+            "image_url": [_OG_IMAGE],
         },
     ),
     # ------------------------------------------------------------------
@@ -305,20 +382,48 @@ PLATFORM_DEFS: dict[str, PlatformDef] = {
         use_stealthy=False,  # DynamicFetcher sufficient
         network_idle=False,  # Ad/analytics scripts keep firing; HTML data is server-rendered
         metrics={
-            "view_count": [
+            "views": [
+                # The first .js-view-count on the page is the main complaint;
+                # sidebar related-posts have their own .js-view-count counters.
+                # Page is server-rendered, so we get the count baked into the HTML.
+                SelectorDef(
+                    selector=".complaint-detail .js-view-count",
+                    method="css",
+                    transform="parse_number",
+                ),
                 SelectorDef(
                     selector="span.js-view-count",
                     method="css",
                     transform="parse_number",
                 ),
             ],
-            "comment_count": [
+            "comments": [
+                # #comments-area carries the authoritative comment count as a
+                # data-attribute, regardless of whether the comment list is
+                # rendered or hidden behind a login wall.
                 SelectorDef(
-                    selector="span.review-count",
+                    selector="#comments-area",
                     method="css",
+                    attribute="data-comments-count",
                     transform="parse_number",
                 ),
             ],
+            "author": [
+                # The first .username inside the complaint detail section is the
+                # complaint creator (e.g. "Yiğit"). The plain .username selector
+                # also matches the brand chip (e.g. "Turkcell"), so be specific.
+                SelectorDef(
+                    selector=".complaint-detail .username",
+                    method="css",
+                    transform="identity",
+                ),
+                SelectorDef(
+                    selector="span.username",
+                    method="css",
+                    transform="identity",
+                ),
+            ],
+            "image_url": [_OG_IMAGE],
         },
     ),
 }

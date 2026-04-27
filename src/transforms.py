@@ -153,7 +153,66 @@ def identity(text: str | None) -> str | None:
     """Return the raw text stripped of whitespace (for non-numeric values)."""
     if text is None:
         return None
-    return text.strip()
+    stripped = text.strip()
+    return stripped if stripped else None
+
+
+# X/Twitter status URL: https://x.com/<handle>/status/<id>  (also twitter.com)
+_X_URL_HANDLE_RE = re.compile(r"(?:x|twitter)\.com/([^/?#]+)/status/", re.IGNORECASE)
+# X og:title formats: "Username (@handle) on X" / "Username on X: ..."
+_X_TITLE_HANDLE_RE = re.compile(r"\(@([A-Za-z0-9_]+)\)")
+_X_TITLE_NAME_RE = re.compile(r"^(.+?)\s+on\s+X\b", re.IGNORECASE)
+
+
+def x_handle_from_url(text: str | None) -> str | None:
+    """Pull the @handle from an x.com / twitter.com status URL."""
+    if not text:
+        return None
+    m = _X_URL_HANDLE_RE.search(text)
+    if m:
+        handle = m.group(1).strip()
+        # Skip non-handle path segments that occasionally show up
+        if handle.lower() in {"i", "intent", "search", "home"}:
+            return None
+        return handle
+    return None
+
+
+def x_handle_from_title(text: str | None) -> str | None:
+    """Pull the @handle (or display name) from an x.com og:title string."""
+    if not text:
+        return None
+    m = _X_TITLE_HANDLE_RE.search(text)
+    if m:
+        return m.group(1).strip()
+    m = _X_TITLE_NAME_RE.search(text)
+    if m:
+        return m.group(1).strip()
+    return None
+
+
+def facebook_author_from_title(text: str | None) -> str | None:
+    """Strip ' | Facebook' suffixes and other noise from a Facebook og:title."""
+    if not text:
+        return None
+    cleaned = text.strip()
+    for suffix in (" | Facebook", " - Facebook", " on Facebook"):
+        if cleaned.endswith(suffix):
+            cleaned = cleaned[: -len(suffix)].strip()
+    # Many Facebook titles look like "Author Name - post snippet"
+    if " - " in cleaned:
+        cleaned = cleaned.split(" - ", 1)[0].strip()
+    return cleaned or None
+
+
+def youtube_thumbnail_from_id(text: str | None) -> str | None:
+    """Build the canonical maxresdefault thumbnail URL from a YouTube video id."""
+    if not text:
+        return None
+    vid = text.strip().strip('"')
+    if not vid:
+        return None
+    return f"https://i.ytimg.com/vi/{vid}/maxresdefault.jpg"
 
 
 # Registry of transform functions
@@ -162,6 +221,10 @@ TRANSFORMS: dict[str, Callable[[str | None], int | str | None]] = {
     "instagram_likes": instagram_likes,
     "instagram_comments": instagram_comments,
     "instagram_username": instagram_username,
+    "x_handle_from_url": x_handle_from_url,
+    "x_handle_from_title": x_handle_from_title,
+    "facebook_author_from_title": facebook_author_from_title,
+    "youtube_thumbnail_from_id": youtube_thumbnail_from_id,
     "identity": identity,
 }
 

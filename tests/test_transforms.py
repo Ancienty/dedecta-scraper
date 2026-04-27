@@ -2,7 +2,17 @@
 
 import pytest
 
-from src.transforms import apply_transform, identity, instagram_comments, instagram_likes, parse_number
+from src.transforms import (
+    apply_transform,
+    facebook_author_from_title,
+    identity,
+    instagram_comments,
+    instagram_likes,
+    parse_number,
+    x_handle_from_title,
+    x_handle_from_url,
+    youtube_thumbnail_from_id,
+)
 
 
 class TestParseNumber:
@@ -130,7 +140,61 @@ class TestIdentity:
         assert identity(None) is None
 
     def test_empty_string(self):
-        assert identity("") == ""
+        # Empty / whitespace-only input is treated as missing so callers can
+        # drop the value cleanly instead of emitting an empty author / url.
+        assert identity("") is None
+        assert identity("   ") is None
+
+
+class TestXHandleFromUrl:
+    @pytest.mark.parametrize("text,expected", [
+        ("https://x.com/elonmusk/status/1234567890", "elonmusk"),
+        ("https://twitter.com/jack/status/20", "jack"),
+        ("https://www.x.com/some_user/status/9", "some_user"),
+        ("https://x.com/i/status/1", None),                    # i/ is not a handle
+        ("https://x.com/elonmusk", None),                      # not a status URL
+        ("", None),
+        (None, None),
+    ])
+    def test_handle_from_url(self, text, expected):
+        assert x_handle_from_url(text) == expected
+
+
+class TestXHandleFromTitle:
+    @pytest.mark.parametrize("text,expected", [
+        ("Elon Musk (@elonmusk) on X", "elonmusk"),
+        ("jack (@jack) on X / Twitter", "jack"),
+        ("Some Handle on X: \"hello world\"", "Some Handle"),
+        ("", None),
+        (None, None),
+    ])
+    def test_handle_from_title(self, text, expected):
+        assert x_handle_from_title(text) == expected
+
+
+class TestFacebookAuthorFromTitle:
+    @pytest.mark.parametrize("text,expected", [
+        ("Page Name | Facebook", "Page Name"),
+        ("Some Page - post snippet | Facebook", "Some Page"),
+        ("Plain Page", "Plain Page"),
+        ("Page on Facebook", "Page"),
+        ("", None),
+        (None, None),
+    ])
+    def test_author_from_title(self, text, expected):
+        assert facebook_author_from_title(text) == expected
+
+
+class TestYouTubeThumbnail:
+    def test_builds_url(self):
+        assert (
+            youtube_thumbnail_from_id("dQw4w9WgXcQ")
+            == "https://i.ytimg.com/vi/dQw4w9WgXcQ/maxresdefault.jpg"
+        )
+
+    @pytest.mark.parametrize("text", ["", None, "   "])
+    def test_empty_returns_none(self, text):
+        assert youtube_thumbnail_from_id(text) is None
 
 
 class TestApplyTransform:
